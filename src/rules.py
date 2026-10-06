@@ -14,6 +14,42 @@ def _validate_calibration(actor, data, lookup):
         raise ValidationError("instrument does not exist")
 
 
+def _validate_standard(actor, data, lookup):
+    valid_from = data.get("valid_from")
+    valid_to = data.get("valid_to")
+    if not valid_from or not valid_to:
+        raise ValidationError("standard requires valid_from and valid_to")
+    if str(valid_from)[:10] > str(valid_to)[:10]:
+        raise ValidationError("standard valid_from must be on or before valid_to")
+    capacity = data.get("capacity")
+    if capacity is None:
+        raise ValidationError("standard requires capacity")
+    try:
+        cap = int(capacity)
+    except (TypeError, ValueError):
+        raise ValidationError("standard capacity must be an integer")
+    if cap < 1:
+        raise ValidationError("standard capacity must be at least 1")
+    data["capacity"] = cap
+
+
+def _validate_workorder(actor, data, lookup):
+    instrument = _find_one(lookup, "instrument", "id", data.get("instrument_id"))
+    if not instrument:
+        raise ValidationError("workorder requires an existing instrument")
+    slot_start = data.get("slot_start")
+    slot_end = data.get("slot_end")
+    if not slot_start or not slot_end:
+        raise ValidationError("workorder requires slot_start and slot_end")
+    if str(slot_start) >= str(slot_end):
+        raise ValidationError("workorder slot_start must be before slot_end")
+    standard_id = data.get("standard_id")
+    if standard_id:
+        standard = _find_one(lookup, "standard", "id", standard_id)
+        if not standard:
+            raise ValidationError("referenced standard does not exist")
+
+
 def _validate_perform(actor, entity, data, lookup):
     if data.get("result") not in ("passed", "failed"):
         raise ValidationError("calibration result must be passed or failed")
@@ -39,18 +75,18 @@ def _validate_result_release(actor, entity, data, lookup):
     return {"released_by": actor.user_id}
 
 
-CUSTOM_CREATE = {'calibration': _validate_calibration}
+CUSTOM_CREATE = {'calibration': _validate_calibration, 'standard': _validate_standard, 'workorder': _validate_workorder}
 CUSTOM_TRANSITIONS = {('calibration', 'perform'): _validate_perform, ('result', 'release'): _validate_result_release}
 
 
 class RuleEngine:
-    ALIASES = {'instruments': 'instrument', 'calibrations': 'calibration', 'methods': 'method', 'results': 'result'}
-    INITIAL_STATUS = {'instrument': 'active', 'calibration': 'requested', 'method': 'draft', 'result': 'pending'}
-    TRANSITIONS = {'instrument': {'send_calibration': (('active',), 'calibrating'), 'calibrate': (('calibrating',), 'active'), 'quarantine': (('active',), 'quarantined'), 'restore': (('quarantined',), 'active')}, 'calibration': {'perform': (('requested', 'failed'), 'passed'), 'approve': (('passed',), 'approved'), 'reject': (('failed',), 'rejected')}, 'method': {'validate_method': (('draft',), 'validated'), 'revoke_method': (('validated',), 'revoked')}, 'result': {'release': (('pending',), 'released'), 'block': (('pending',), 'blocked'), 'reanalyze': (('blocked',), 'pending')}}
-    CREATE_REQUIRED = {'instrument': ('name', 'serial'), 'calibration': ('instrument_id', 'requested_at'), 'method': ('name', 'version'), 'result': ('sample_id', 'measurement')}
-    ACTION_REQUIRED = {('instrument', 'calibrate'): ('due_at', 'passed'), ('instrument', 'quarantine'): ('reason',), ('calibration', 'perform'): ('result', 'performed_at', 'uncertainty'), ('calibration', 'approve'): ('authorized_by',), ('calibration', 'reject'): ('reason',), ('method', 'validate_method'): ('parameters', 'instrument_ids'), ('method', 'revoke_method'): ('reason',), ('result', 'release'): ('instrument_id', 'method_id', 'value', 'unit'), ('result', 'block'): ('reason',), ('result', 'reanalyze'): ('reason',)}
-    CREATE_ROLES = {'instrument': ('admin', 'technician'), 'calibration': ('admin', 'metrology'), 'method': ('admin', 'authorizer'), 'result': ('admin', 'analyst')}
-    ROLE_ACTIONS = {'send_calibration': ('admin', 'technician'), 'calibrate': ('admin', 'metrology'), 'quarantine': ('admin', 'metrology'), 'restore': ('admin', 'metrology'), 'perform': ('admin', 'metrology'), 'approve': ('admin', 'authorizer'), 'reject': ('admin', 'authorizer'), 'validate_method': ('admin', 'authorizer'), 'revoke_method': ('admin', 'authorizer'), 'release': ('admin', 'analyst'), 'block': ('admin', 'analyst'), 'reanalyze': ('admin', 'analyst')}
+    ALIASES = {'instruments': 'instrument', 'calibrations': 'calibration', 'methods': 'method', 'results': 'result', 'standards': 'standard', 'workorders': 'workorder'}
+    INITIAL_STATUS = {'instrument': 'active', 'calibration': 'requested', 'method': 'draft', 'result': 'pending', 'standard': 'active', 'workorder': 'pending'}
+    TRANSITIONS = {'instrument': {'send_calibration': (('active',), 'calibrating'), 'calibrate': (('calibrating',), 'active'), 'quarantine': (('active',), 'quarantined'), 'restore': (('quarantined',), 'active')}, 'calibration': {'perform': (('requested', 'failed'), 'passed'), 'approve': (('passed',), 'approved'), 'reject': (('failed',), 'rejected')}, 'method': {'validate_method': (('draft',), 'validated'), 'revoke_method': (('validated',), 'revoked')}, 'result': {'release': (('pending',), 'released'), 'block': (('pending',), 'blocked'), 'reanalyze': (('blocked',), 'pending')}, 'standard': {'deactivate': (('active',), 'inactive'), 'activate': (('inactive',), 'active')}, 'workorder': {'schedule': (('pending',), 'scheduled'), 'start': (('scheduled',), 'in_progress'), 'complete': (('in_progress',), 'completed')}}
+    CREATE_REQUIRED = {'instrument': ('name', 'serial'), 'calibration': ('instrument_id', 'requested_at'), 'method': ('name', 'version'), 'result': ('sample_id', 'measurement'), 'standard': ('name', 'serial', 'valid_from', 'valid_to', 'capacity'), 'workorder': ('instrument_id', 'slot_start', 'slot_end')}
+    ACTION_REQUIRED = {('instrument', 'calibrate'): ('due_at', 'passed'), ('instrument', 'quarantine'): ('reason',), ('calibration', 'perform'): ('result', 'performed_at', 'uncertainty'), ('calibration', 'approve'): ('authorized_by',), ('calibration', 'reject'): ('reason',), ('method', 'validate_method'): ('parameters', 'instrument_ids'), ('method', 'revoke_method'): ('reason',), ('result', 'release'): ('instrument_id', 'method_id', 'value', 'unit'), ('result', 'block'): ('reason',), ('result', 'reanalyze'): ('reason',), ('standard', 'deactivate'): ('reason',)}
+    CREATE_ROLES = {'instrument': ('admin', 'technician'), 'calibration': ('admin', 'metrology'), 'method': ('admin', 'authorizer'), 'result': ('admin', 'analyst'), 'standard': ('admin', 'metrology'), 'workorder': ('admin', 'metrology')}
+    ROLE_ACTIONS = {'send_calibration': ('admin', 'technician'), 'calibrate': ('admin', 'metrology'), 'quarantine': ('admin', 'metrology'), 'restore': ('admin', 'metrology'), 'perform': ('admin', 'metrology'), 'approve': ('admin', 'authorizer'), 'reject': ('admin', 'authorizer'), 'validate_method': ('admin', 'authorizer'), 'revoke_method': ('admin', 'authorizer'), 'release': ('admin', 'analyst'), 'block': ('admin', 'analyst'), 'reanalyze': ('admin', 'analyst'), 'deactivate': ('admin', 'metrology'), 'activate': ('admin', 'metrology'), 'schedule': ('admin', 'metrology'), 'start': ('admin', 'metrology'), 'complete': ('admin', 'metrology')}
 
     def normalize_kind(self, kind):
         return self.ALIASES.get(kind, kind)

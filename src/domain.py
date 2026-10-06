@@ -23,6 +23,10 @@ class ConflictError(DomainError):
     """A version or uniqueness constraint was violated."""
 
 
+class CapacityFull(ConflictError):
+    """A standard has no free capacity for the requested time slot."""
+
+
 class InvalidTransition(DomainError):
     """The requested state transition is not valid."""
 
