@@ -19,10 +19,12 @@
   <pre id="result">等待操作</pre>
   <h2>常用接口</h2>
   <pre>GET  /health
-GET  /api/&lt;kind&gt;
+GET  /api/&lt;kind&gt;                       instrument / standard / work_order
 POST /api/&lt;kind&gt;
 GET  /api/entities/&lt;id&gt;
-POST /api/entities/&lt;id&gt;/actions</pre>
+POST /api/entities/&lt;id&gt;/actions       schedule/enqueue/complete/cancel；suspend/reactivate/expire/renew
+GET  /api/occupancy?standard_id=&amp;state=held
+GET  /api/audit</pre>
 </main>
 <script>
 async function checkHealth() {
